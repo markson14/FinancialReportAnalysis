@@ -1,0 +1,11 @@
+__pycache__/
+*.txt
+*.csv
+daily_report/
+Documents/
+宏观分析
+指数分析
+*.tar.gz
+american_market.py
+Estimation_model.py
+temp.ipynb
