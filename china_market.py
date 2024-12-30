@@ -57,7 +57,6 @@ def load_ths_report(financial_data, total_volume):
     base_cps, cps_list = return_last_4q(
         "每股经营现金流", financial_data, float, func=np.sum, is_cumulate=True
     )
-    cash_flow = base_cps * total_volume
     cps_yoy_rate, cps_yoy_speed, cps_compund_g = get_yoy_rate_and_speed(
         cps_list, get_TTM=True, use_min_value=False
     )
@@ -95,8 +94,6 @@ def load_ths_report(financial_data, total_volume):
         "营业总收入增速-TTM": round(sale_flow_speed, 4),
         "当季营业总收入同比": round(cur_sale_flow_yoy, 4),
         "当季营业总收入增速": round(cur_sale_flow_speed, 4),
-        "经营现金流": to_yi_round2(cash_flow),
-        "经营现金流复合增长率": round(cps_compund_g, 4),
         "速动资产/流动负债": round(cash_flow_to_debt_ratio, 4),
         "资产负债率": round(debt_ratio, 4),
         "base_cps": base_cps,
@@ -104,6 +101,7 @@ def load_ths_report(financial_data, total_volume):
         "cps_yoy_speed": cps_yoy_speed,
         "net_compound_g": net_compound_g,
         "sale_flow_compound_g": sale_flow_compound_g,
+        "cps_list": cps_list,
         # "基本每股收益-TTM": round(profit_per_value, 4),
     }
 
@@ -135,6 +133,41 @@ def get_debts_report(code: str):
 
 def get_cash_report(code: str):
     cash_df = ak.stock_financial_cash_ths(code)
+    if "购建固定资产、无形资产和其他长期资产支付的现金" in cash_df.columns:
+        cap_exp_ttm, capexp_list = return_last_4q(
+            "购建固定资产、无形资产和其他长期资产支付的现金",
+            cash_df,
+            parse_chinese_number,
+            func=np.sum,
+            is_cumulate=True,
+        )
+    else:
+        cap_exp_ttm = 0
+
+    if "*经营活动产生的现金流量净额" in cash_df.columns:
+        op_cash_flow_ttm, op_cash_flow_list = return_last_4q(
+            "*经营活动产生的现金流量净额",
+            cash_df,
+            parse_chinese_number,
+            func=np.sum,
+            is_cumulate=True,
+        )
+
+    # 自由现金流
+    fcf_ttm = op_cash_flow_ttm - cap_exp_ttm
+    fcf_list = [ocf - capexp for ocf, capexp in zip(op_cash_flow_list, capexp_list)]
+    fcf_yoy_rate, fcf_yoy_speed, fcf_compund_g = get_yoy_rate_and_speed(
+        fcf_list, get_TTM=True, use_min_value=False
+    )
+
+    return {
+        "captal_expense": cap_exp_ttm,
+        "capexp_list": capexp_list,
+        "fcf_ttm": fcf_ttm,
+        "fcf_yoy_rate": fcf_yoy_rate,
+        "fcf_yoy_speed": fcf_yoy_speed,
+        "fcf_compund_g": fcf_compund_g,
+    }
 
 
 def get_benefits_report(code: str):
@@ -334,6 +367,7 @@ def get_stock_data(code: str, rt_info: pd.DataFrame, sy_info: pd.DataFrame):
     cumulate_roe_list, roe_larger_12 = get_roe_list(
         benefit_report.pop("net_profit_list"), debts_report.pop("equity_list")
     )
+    cash_report = get_cash_report(code)
 
     out_dict = {
         "股票名称": name,
@@ -347,6 +381,7 @@ def get_stock_data(code: str, rt_info: pd.DataFrame, sy_info: pd.DataFrame):
     out_dict.update(financial_report)
     out_dict.update(benefit_report)
     out_dict.update(shangyu_report)
+    out_dict.update(cash_report)
 
     # 估值指标
     PS = round(out_dict["总市值"] / out_dict["营业总收入-TTM"], 2)
@@ -404,8 +439,8 @@ def get_stock_data(code: str, rt_info: pd.DataFrame, sy_info: pd.DataFrame):
         "当季毛利率": to_percentage(out_dict.pop("当季毛利率")),
         "当季毛利率同比": to_percentage(out_dict.pop("当季毛利率同比")),
         "当季毛利率同比增速": to_percentage(out_dict.pop("当季毛利率同比增速")),
-        "经营现金流": out_dict.pop("经营现金流"),
-        "经营现金流复合增长率": out_dict.pop("经营现金流复合增长率"),
+        "自由现金流": to_yi_round2(out_dict.pop("fcf_ttm")),
+        "自由现金流复合增长率": to_percentage(out_dict.pop("fcf_compund_g")),
         "速动资产/流动负债": out_dict.pop("速动资产/流动负债"),
         "资产负债率": to_percentage(out_dict.pop("资产负债率")),
         "少数股东损益": out_dict.pop("少数股东损益"),
@@ -509,6 +544,6 @@ def test_api():
 
 
 if __name__ == "__main__":
-      MultiprocessChina().multiprocess_main()
+    MultiprocessChina().multiprocess_main()
     # MultiprocessChina().test_single()
     # test_api()
