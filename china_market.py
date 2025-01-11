@@ -13,16 +13,9 @@ import warnings
 
 warnings.filterwarnings("ignore")
 
-from utils import (
-    to_percentage,
-    to_yi_round2,
-    parse_chinese_number,
-    parse_percentage,
-    save_csv,
-    current_date,
-    get_yoy_rate_and_speed,
-    return_last_4q,
-)
+from utils import *
+from metrics import *
+from reports import *
 
 # stock_zh_a_spot_em(https://akshare.akfamily.xyz/data/stock/stock.html#id10)
 # stock_individual_info_em（https://akshare.akfamily.xyz/data/stock/stock.html#id8）
@@ -30,286 +23,12 @@ from utils import (
 # 个数指标api：stock_a_indicator_lg（https://akshare.akfamily.xyz/data/stock/stock.html#id257）
 
 
-def load_ths_report(financial_data, total_volume):
-    if "扣非净利润" in financial_data.columns:
-        net_profit, profit_list = return_last_4q(
-            "扣非净利润",
-            financial_data,
-            parse_chinese_number,
-            func=np.sum,
-            is_cumulate=True,
-        )
-    else:
-        print("扣非净利润未揭露")
-        net_profit, profit_list = return_last_4q(
-            "净利润",
-            financial_data,
-            parse_chinese_number,
-            func=np.sum,
-            is_cumulate=True,
-        )
-    net_profit_yoy, net_profit_speed, net_compound_g = get_yoy_rate_and_speed(
-        profit_list, get_TTM=True
-    )
-    cur_net_profit_yoy, cur_net_profit_speed, _ = get_yoy_rate_and_speed(profit_list)
-
-    # 经营现金流估计
-    base_cps, cps_list = return_last_4q(
-        "每股经营现金流", financial_data, float, func=np.sum, is_cumulate=True
-    )
-    cps_yoy_rate, cps_yoy_speed, cps_compund_g = get_yoy_rate_and_speed(
-        cps_list, get_TTM=True, use_min_value=False
-    )
-
-    sale_flow, sale_list = return_last_4q(
-        "营业总收入",
-        financial_data,
-        parse_chinese_number,
-        func=np.sum,
-        is_cumulate=True,
-    )
-    sale_flow_yoy, sale_flow_speed, sale_flow_compound_g = get_yoy_rate_and_speed(
-        sale_list, get_TTM=True
-    )
-    cur_sale_flow_yoy, cur_sale_flow_speed, _ = get_yoy_rate_and_speed(sale_list)
-    profit_per_value, _ = return_last_4q(
-        "基本每股收益", financial_data, float, func=np.sum, is_cumulate=True
-    )
-    if "速动比率" in financial_data.columns:
-        cash_flow_to_debt_ratio, _ = return_last_4q("速动比率", financial_data, float)
-    else:
-        cash_flow_to_debt_ratio = -1
-    debt_ratio, _ = return_last_4q("资产负债率", financial_data, parse_percentage)
-
-    # 净资产收益率
-
-    return {
-        "扣非净利润-TTM": to_yi_round2(net_profit),
-        "扣非净利润同比-TTM": round(net_profit_yoy, 4),
-        "扣非净利润增速-TTM": round(net_profit_speed, 4),
-        "当季扣非净利润同比": round(cur_net_profit_yoy, 4),
-        "当季扣非净利润增速": round(cur_net_profit_speed, 4),
-        "营业总收入-TTM": to_yi_round2(sale_flow),
-        "营业总收入同比-TTM": round(sale_flow_yoy, 4),
-        "营业总收入增速-TTM": round(sale_flow_speed, 4),
-        "当季营业总收入同比": round(cur_sale_flow_yoy, 4),
-        "当季营业总收入增速": round(cur_sale_flow_speed, 4),
-        "速动资产/流动负债": round(cash_flow_to_debt_ratio, 4),
-        "资产负债率": round(debt_ratio, 4),
-        "base_cps": base_cps,
-        "cps_yoy_rate": cps_yoy_rate,
-        "cps_yoy_speed": cps_yoy_speed,
-        "net_compound_g": net_compound_g,
-        "sale_flow_compound_g": sale_flow_compound_g,
-        "cps_list": cps_list,
-        # "基本每股收益-TTM": round(profit_per_value, 4),
-    }
-
-
-def get_dividend_year_ratio(code: str, total_value: float):
-    try:
-        temp_list = ak.stock_fhps_detail_ths(symbol=code).iloc[-2:]["分红总额"].tolist()
-    except:
-        temp_list = (
-            ak.stock_fhps_detail_ths(symbol=code).iloc[-2:]["AH分红总额"].tolist()
-        )
-    year_dividend = 0
-    for temp in temp_list:
-        if not "亿" in temp and not "万" in temp:
-            continue
-        year_dividend += parse_chinese_number(temp)
-    dividend_year_ratio = year_dividend / total_value
-
-    return dividend_year_ratio
-
-
-def get_debts_report(code: str):
-    debts_df = ak.stock_financial_debt_ths(code)
-    # 归母股东权益
-
-    _, equity_list = return_last_4q(5, debts_df, parse_chinese_number, func=np.sum)
-    return {"equity_list": equity_list}
-
-
-def get_cash_report(code: str):
-    cash_df = ak.stock_financial_cash_ths(code)
-    if "购建固定资产、无形资产和其他长期资产支付的现金" in cash_df.columns:
-        cap_exp_ttm, capexp_list = return_last_4q(
-            "购建固定资产、无形资产和其他长期资产支付的现金",
-            cash_df,
-            parse_chinese_number,
-            func=np.sum,
-            is_cumulate=True,
-        )
-    else:
-        cap_exp_ttm = 0
-
-    if "*经营活动产生的现金流量净额" in cash_df.columns:
-        op_cash_flow_ttm, op_cash_flow_list = return_last_4q(
-            "*经营活动产生的现金流量净额",
-            cash_df,
-            parse_chinese_number,
-            func=np.sum,
-            is_cumulate=True,
-        )
-
-    # 自由现金流
-    fcf_ttm = op_cash_flow_ttm - cap_exp_ttm
-    fcf_list = [ocf - capexp for ocf, capexp in zip(op_cash_flow_list, capexp_list)]
-    fcf_yoy_rate, fcf_yoy_speed, fcf_compund_g = get_yoy_rate_and_speed(
-        fcf_list, get_TTM=True, use_min_value=False
-    )
-
-    return {
-        "captal_expense": cap_exp_ttm,
-        "capexp_list": capexp_list,
-        "fcf_ttm": fcf_ttm,
-        "fcf_yoy_rate": fcf_yoy_rate,
-        "fcf_yoy_speed": fcf_yoy_speed,
-        "fcf_compund_g": fcf_compund_g,
-    }
-
-
-def get_benefits_report(code: str):
-    benefits_df = ak.stock_financial_benefit_ths(code)
-    three_cost = []
-    if "销售费用" in benefits_df.columns:
-        sell_cost = np.array(
-            return_last_4q(
-                "销售费用", benefits_df, parse_chinese_number, is_cumulate=True
-            )[1],
-            dtype=np.float64,
-        )
-        three_cost.append(sell_cost)
-    if "管理费用" in benefits_df.columns:
-        manage_cost = np.array(
-            return_last_4q(
-                "管理费用", benefits_df, parse_chinese_number, is_cumulate=True
-            )[1]
-        )
-        three_cost.append(manage_cost)
-    if "研发费用" in benefits_df.columns:
-        dev_cost = np.array(
-            return_last_4q(
-                "研发费用", benefits_df, parse_chinese_number, is_cumulate=True
-            )[1],
-            dtype=np.float64,
-        )
-        three_cost.append(dev_cost)
-    if "财务费用" in benefits_df.columns:
-        financial_cost = np.array(
-            return_last_4q(
-                "财务费用", benefits_df, parse_chinese_number, is_cumulate=True
-            )[1],
-            dtype=np.float64,
-        )
-        three_cost.append(financial_cost)
-    three_cost = np.sum(three_cost, axis=0)
-    if isinstance(three_cost, np.ndarray):
-        threecost_yoy_rate, threecost_yoy_speed, _ = get_yoy_rate_and_speed(three_cost)
-    else:
-        threecost_yoy_rate, threecost_yoy_speed = -1, -1
-    # 少数股东损益
-    if "少数股东损益" not in benefits_df.columns:
-        minor_shares = 0
-    else:
-        minor_shares = return_last_4q(
-            "少数股东损益",
-            benefits_df,
-            parse_chinese_number,
-            func=np.sum,
-            is_cumulate=True,
-        )[0]
-    # 基本每股收益
-    if "（一）基本每股收益" in benefits_df.columns:
-        basic_eps, eps_list = return_last_4q(
-            "（一）基本每股收益",
-            benefits_df,
-            float,
-            func=np.sum,
-            is_cumulate=True,
-        )
-    else:
-        basic_eps = 0
-    eps_yoy_rate, eps_yoy_speed, _ = get_yoy_rate_and_speed(
-        eps_list, get_TTM=True, use_min_value=False
-    )
-    # 毛利率
-    _, income_list = return_last_4q(
-        3, benefits_df, parse_chinese_number, func=np.sum, is_cumulate=True
-    )
-    _, expense_list = return_last_4q(
-        4, benefits_df, parse_chinese_number, func=np.sum, is_cumulate=True
-    )
-    gross_profit_rate_list = (
-        np.array(income_list) - np.array(expense_list)
-    ) / np.array(income_list)
-    gross_profit_yoy_rate, gross_profit_yoy_speed, _ = get_yoy_rate_and_speed(
-        gross_profit_rate_list, use_min_value=False
-    )
-    gross_profit_rate = (income_list[0] - expense_list[0]) / income_list[0]
-    # 扣非净利润
-    _, net_profit_list = return_last_4q(
-        5, benefits_df, parse_chinese_number, func=np.sum, is_cumulate=True
-    )
-    return {
-        "当季毛利率": round(gross_profit_rate, 4),
-        "当季毛利率同比": round(gross_profit_yoy_rate, 4),
-        "当季毛利率同比增速": round(gross_profit_yoy_speed, 4),
-        "少数股东损益": to_yi_round2(minor_shares, 4),
-        "当季三费同比": round(threecost_yoy_rate, 4),
-        "net_profit_list": net_profit_list,
-        "basic_eps": basic_eps,
-        "eps_yoy_rate": eps_yoy_rate,
-        "eps_yoy_speed": eps_yoy_speed,
-    }
-
-
-def get_roe_list(net_profit_list, equity_list):
-    threshold = 0.12
-
-    # 定义一个函数来计算ROE-TTM
-    def calculate_roe_ttm(quarterly_roe):
-        roe_ttm = []
-        for i in range(len(quarterly_roe) - 3):  # 确保有足够的季度
-            ttm = sum(quarterly_roe[i : i + 4])  # 求和四个季度的ROE
-            roe_ttm.append(ttm)  # 将TTM结果添加到列表中
-        return roe_ttm
-
-    net_profit_list = np.array(net_profit_list)
-    net_profit_list[net_profit_list < 0] = 0
-    equity_list = np.array(equity_list)
-    equity_list[equity_list < 0] = -1
-
-    if len(net_profit_list) != len(equity_list):
-        net_profit_list = net_profit_list[: len(equity_list)]
-    quater_roe_list = net_profit_list / equity_list
-    cumulate_roe_list = calculate_roe_ttm(quater_roe_list)
-
-    # get the number of ROE larger than 12%
-    count = 0
-    for roe_ttm in cumulate_roe_list:
-        if roe_ttm >= threshold:
-            count += 1
-        else:
-            break
-    return cumulate_roe_list, count
-
-
-def get_mean60day(code):
-    """
-    获取指数的回溯指数10年60日均值偏离度
-    """
-    history_data = ak.stock_zh_a_hist(symbol=code)
-    mean_60day = history_data["收盘"].rolling(window=60).mean().iloc[-1]
-    mean_60day_bias = (history_data["收盘"].iloc[-1] - mean_60day) / mean_60day
-    return {"mean_60day": mean_60day, "mean_60day_bias": mean_60day_bias}
-
-
 @retry(wait_fixed=3000, stop_max_attempt_number=2)
 def get_stock_data(code: str, rt_info: pd.DataFrame, sy_info: pd.DataFrame):
+    ######################### basic information #########################
     # 获取个股最新财务指标数据
     rt_stock_info = rt_info[rt_info["代码"] == code]
+
     # 获取个股商誉
     sy_stock_info = sy_info[sy_info["股票代码"] == code]
     if sy_stock_info.empty:
@@ -330,6 +49,7 @@ def get_stock_data(code: str, rt_info: pd.DataFrame, sy_info: pd.DataFrame):
         return None
     PB = rt_stock_info["市净率"].values[0]
     stock_info = ak.stock_individual_info_em(symbol=code)
+
     # 基础信息
     name = stock_info[stock_info["item"] == "股票简称"]["value"].values[0]
     sector = stock_info[stock_info["item"] == "行业"]["value"].values[0]
@@ -340,6 +60,7 @@ def get_stock_data(code: str, rt_info: pd.DataFrame, sy_info: pd.DataFrame):
         return None
     if total_value == "-":
         total_value = total_volume * rt_price
+
     # 财报信息
     financial_data = ak.stock_financial_abstract_ths(symbol=code)
     fa_date = int(financial_data["报告期"].values[0].replace("-", ""))
@@ -354,21 +75,10 @@ def get_stock_data(code: str, rt_info: pd.DataFrame, sy_info: pd.DataFrame):
         fa_value = total_volume * float(fa_price["收盘"].values[0])
     except:
         return None
-    # 财报期 市值
-
-    # ROE, net_profit, net_profit_yoy, cash_flow = load_sina_report(financial_data)
     financial_report = load_ths_report(financial_data, total_volume)
-    # 股息率 -> 每股分红
-    dividend_year_ratio = get_dividend_year_ratio(code, total_value)
-    dividend_per_volume = rt_price * dividend_year_ratio
-    # 财报信息
     benefit_report = get_benefits_report(code)
     debts_report = get_debts_report(code)
-    cumulate_roe_list, roe_larger_12 = get_roe_list(
-        benefit_report.pop("net_profit_list"), debts_report.pop("equity_list")
-    )
     cash_report = get_cash_report(code)
-
     out_dict = {
         "股票名称": name,
         "代码": str(code),
@@ -382,7 +92,9 @@ def get_stock_data(code: str, rt_info: pd.DataFrame, sy_info: pd.DataFrame):
     out_dict.update(benefit_report)
     out_dict.update(shangyu_report)
     out_dict.update(cash_report)
+    out_dict.update(debts_report)
 
+    ######################### advance metrices #########################
     # 估值指标
     PS = round(out_dict["总市值"] / out_dict["营业总收入-TTM"], 2)
     PE_TTM = round(
@@ -400,21 +112,33 @@ def get_stock_data(code: str, rt_info: pd.DataFrame, sy_info: pd.DataFrame):
             "市盈率-TTM": PE_TTM,
             "市盈率-TTM(财报)": PE_TTM_fr,
             "ROE": ROE,
-            "ROE_qualified-TTM": roe_larger_12,
         }
     )
-
     # compute in advance
-    dpv = round(dividend_per_volume, 4)
     current_value = out_dict.pop("当前价格")
     basic_eps = out_dict.pop("basic_eps")
     basic_cps = out_dict.pop("base_cps")
-    dividend_yield = round(dpv / current_value, 4)
     pe_ttm = out_dict.pop("市盈率-TTM")
+
+    # 股息率 -> 每股分红
+    dividend_year_ratio = get_dividend_year_ratio(code, total_value)
+    dividend_per_volume = rt_price * dividend_year_ratio
+    dpv = round(dividend_per_volume, 4)
+    dividend_yield = round(dpv / current_value, 4)
+
+    # ROE > 12%的季度数
+    cumulate_roe_list, roe_larger_12 = get_roe_list(out_dict)
 
     # 60日均线
     mean60day = get_mean60day(code)
 
+    # 自由现金流率
+    fcf_rate = get_fcf_rate(out_dict)
+
+    # 盈利质量
+    profit_quality = get_profit_quality(out_dict)
+
+    # 输出结果
     final_report = {
         "股票名称": out_dict.pop("股票名称"),
         "代码": out_dict.pop("代码"),
@@ -452,7 +176,7 @@ def get_stock_data(code: str, rt_info: pd.DataFrame, sy_info: pd.DataFrame):
         "市盈率-TTM": pe_ttm,
         "市盈率-TTM(财报)": out_dict.pop("市盈率-TTM(财报)"),
         "ROE": out_dict.pop("ROE"),
-        "ROE_qualified-TTM": out_dict.pop("ROE_qualified-TTM"),
+        "ROE_qualified-TTM": roe_larger_12,
         "每股分红": dpv,
         "股息率": to_percentage(dividend_yield),
         "分红率": to_percentage(dividend_yield * pe_ttm),
@@ -466,6 +190,8 @@ def get_stock_data(code: str, rt_info: pd.DataFrame, sy_info: pd.DataFrame):
         "cps-TTM同比增速": to_percentage(round(out_dict.pop("cps_yoy_speed"), 4)),
         "60日均线": round(mean60day.pop("mean_60day"), 4),
         "60日均线偏离": to_percentage(round(mean60day.pop("mean_60day_bias"), 4)),
+        "盈利质量": to_percentage(round(profit_quality, 4)),
+        "自由现金流率": to_percentage(round(fcf_rate, 4)),
     }
     del out_dict
     return final_report
@@ -518,32 +244,29 @@ class MultiprocessChina:
 
     def test_single(self):
         # stock_codes = self.rt_info["代码"].tolist()  # 获取股票代码列表
-        stock_codes = ["688382"]
-        # stock_codes = ["603075"]
+        stock_codes = ["000858"]
+        # stock_codes = ["601328"]
         with tqdm(total=len(stock_codes), desc="获取股票数据") as pbar:
             for code in stock_codes:
                 pbar.update(1)
+                test_api(code)
                 data = self.fetch_data_for_code(code)
                 print(data)
                 break
 
 
-def test_api():
-    code = "000568"
-    # debts_df = ak.stock_financial_debt_ths(code)
-    # print(debts_df)
+def test_api(code):
     debt = ak.stock_financial_debt_ths(code)
     benefit = ak.stock_financial_benefit_ths(code)
     cash = ak.stock_financial_cash_ths(code)
     abstract = ak.stock_financial_abstract_ths(code)
 
-    debt.to_csv("debt.csv", index=False)
-    benefit.to_csv("benefit.csv", index=False)
-    cash.to_csv("cash.csv", index=False)
-    abstract.to_csv("abstract.csv", index=False)
+    debt.to_csv("./temp/debt.csv", index=False)
+    benefit.to_csv("./temp/benefit.csv", index=False)
+    cash.to_csv("./temp/cash.csv", index=False)
+    abstract.to_csv("./temp/abstract.csv", index=False)
 
 
 if __name__ == "__main__":
-    MultiprocessChina().multiprocess_main()
-    # MultiprocessChina().test_single()
-    # test_api()
+    # MultiprocessChina().multiprocess_main()
+    MultiprocessChina().test_single()
