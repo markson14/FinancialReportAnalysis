@@ -1,7 +1,7 @@
 import akshare as ak
 import numpy as np
 
-from utils import parse_chinese_number
+from src.utils import parse_chinese_number, HUNDRED_MILLION
 
 
 def get_dividend_year_ratio(code: str, total_value: float):
@@ -66,10 +66,9 @@ def get_mean60day(code):
 
 def get_fcf_rate(out_dict):
     fcf_ttm = out_dict["fcf_ttm"]
-    total_value = out_dict["总市值"]
+    total_value = out_dict["总市值"] * HUNDRED_MILLION
     monetary_funds = out_dict["monetary_funds"]
     total_liabilities = out_dict["total_liabilities"]
-
     fcf_rate = fcf_ttm / (total_value + total_liabilities - monetary_funds)
     return fcf_rate
 

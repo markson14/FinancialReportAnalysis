@@ -1,7 +1,7 @@
 import numpy as np
 import akshare as ak
 from rich import print
-from utils import *
+from src.utils import *
 
 __all__ = [
     "load_ths_report",

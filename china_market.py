@@ -13,9 +13,9 @@ import warnings
 
 warnings.filterwarnings("ignore")
 
-from utils import *
-from metrics import *
-from reports import *
+from src.utils import *
+from src.metrics import *
+from src.reports import *
 
 # stock_zh_a_spot_em(https://akshare.akfamily.xyz/data/stock/stock.html#id10)
 # stock_individual_info_em（https://akshare.akfamily.xyz/data/stock/stock.html#id8）
