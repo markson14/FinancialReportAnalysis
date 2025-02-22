@@ -83,13 +83,13 @@ def load_ths_report(financial_data, total_volume):
         "net_compound_g": net_compound_g,
         "sale_flow_compound_g": sale_flow_compound_g,
         "cps_list": cps_list,
+        "net_profit": net_profit,
         # "基本每股收益-TTM": round(profit_per_value, 4),
     }
 
 
-def get_debts_report(code: str):
+def get_debts_report(debts_df, code: str):
     # 负债表中数据都是当下数据，所以不需要累计，取最新计算即可
-    debts_df = ak.stock_financial_debt_ths(code)
     # 归母股东权益
 
     _, net_equity_list = return_last_4q(5, debts_df, parse_chinese_number)
@@ -115,8 +115,7 @@ def get_debts_report(code: str):
     }
 
 
-def get_cash_report(code: str):
-    cash_df = ak.stock_financial_cash_ths(code)
+def get_cash_report(cash_df, code: str):
     if "购建固定资产、无形资产和其他长期资产支付的现金" in cash_df.columns:
         cap_exp_ttm, capexp_list = return_last_4q(
             "购建固定资产、无形资产和其他长期资产支付的现金",
@@ -155,8 +154,7 @@ def get_cash_report(code: str):
     }
 
 
-def get_benefits_report(code: str):
-    benefits_df = ak.stock_financial_benefit_ths(code)
+def get_benefits_report(benefits_df, code: str):
     three_cost = []
     if "销售费用" in benefits_df.columns:
         sell_cost = np.array(

@@ -85,3 +85,14 @@ def get_profit_quality(out_dict):
         net_equity + total_liabilities
     )
     return profit_quality
+
+
+def get_RO_metrics(out_dict):
+    """
+    获取RO指标
+    """
+    net_profit = out_dict["net_profit"]
+    net_equity = out_dict["net_equity_list"][0]
+    total_liabilities = out_dict["total_liabilities"]
+    ROA = net_profit / (net_equity + total_liabilities)
+    return ROA
