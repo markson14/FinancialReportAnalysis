@@ -357,6 +357,10 @@ def test_api(code):
         cash.to_csv("./temp/cash.csv", index=False)
         abstract.to_csv("./temp/abstract.csv", index=False)
 
+        analyzer = AsyncChinaAnalyzer(max_concurrency=1)
+        result = asyncio.run(analyzer.run_analysis([code]))
+        print(result)
+
         print("API测试完成")
 
     except Exception as e:
@@ -366,6 +370,7 @@ def test_api(code):
 
 if __name__ == "__main__":
     try:
+        # test_api("601398")
         asyncio.run(main())
     except KeyboardInterrupt:
         print("程序被用户中断")

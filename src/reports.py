@@ -12,6 +12,8 @@ __all__ = [
 
 
 def load_ths_report(financial_data, total_volume):
+    # 颠倒排序
+    financial_data = financial_data.iloc[::-1]
     if "扣非净利润" in financial_data.columns:
         net_profit, profit_list = return_last_4q(
             "扣非净利润",
