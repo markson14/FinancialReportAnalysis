@@ -9,16 +9,7 @@ import warnings
 
 warnings.filterwarnings("ignore")
 
-from utils import (
-    to_percentage,
-    to_yi_round2,
-    parse_chinese_number,
-    parse_percentage,
-    save_csv,
-    current_date,
-    get_yoy_rate_and_speed,
-    return_last_4q,
-)
+from src.utils import *
 
 console = Console()
 print = console.print
@@ -76,14 +67,16 @@ class MultiprocessChina:
         # self.rt_info = ak.stock_zh_index_spot_sina()  # 获取指数信息
         self.index_list = [
             {"sh000001": self.shangzheng},  # 上证指数
-            "sz399300",  # 沪深300
-            "sz399006",  # 创业板指
-            "sh000905",  # 中证500
+            # "sz399995",  # 基建工程
+            # "sz399975",  # 证券公司
+            # "sz399300",  # 沪深300
+            # "sz399006",  # 创业板指
+            # "sh000905",  # 中证500
             # "sz399296",  # 创成长
             # "HSI",  # 恒生指数
-            # "HSTECH",  # 恒生科技指数
+            "HSTECH",  # 恒生科技指数
         ]
-        self.backtrack_year = 10  # 回溯年数
+        self.backtrack_year = 3  # 回溯年数
         self.day_offset = 60  # 回溯天数
         self.buy_sum = 4
         self.sell_sum = 4
@@ -96,6 +89,8 @@ class MultiprocessChina:
         self.min_margin = -0.05
         self.initial_investment_list = [200000]
         self.offset = 0  # 购买日期延后天数
+
+
 
     def fetch_data_for_code(self, code):
         data = get_index_data(str(code))
@@ -406,6 +401,8 @@ class MultiprocessChina:
         else:
             history_data = list(code.values())[0]
             code = list(code.keys())[0]
+
+        print(f"history data days: {len(history_data)}")
         date = history_data["date"].iloc[-self.backtrack_year * 250 - self.day_offset :]
         try:
             amount = history_data["amount"].iloc[
@@ -435,6 +432,11 @@ class MultiprocessChina:
             .rolling(window=20)
             .mean()[-self.backtrack_year * 250 - self.day_offset :]
         )
+        mean_120day = (
+            history_data["close"]
+            .rolling(window=120)
+            .mean()[-self.backtrack_year * 250 - self.day_offset :]
+        )
 
         # 计算偏离度百分位
         status_list = list(
@@ -443,6 +445,7 @@ class MultiprocessChina:
         bias_list = ((current_pos - mean_60day) / mean_60day).tolist()
         bias_30_list = ((current_pos - mean_30day) / mean_30day).tolist()
         bias_20_list = ((current_pos - mean_20day) / mean_20day).tolist()
+        bias_120_list = ((current_pos - mean_120day) / mean_120day).tolist()
 
         kama_list = KAMA(current_pos)
         bias_kama_list = ((current_pos - kama_list) / kama_list).tolist()
@@ -487,14 +490,14 @@ class MultiprocessChina:
             ),
             "当前点位": current_pos_list,
             "日涨跌幅": list(map(to_percentage, current_change.tolist())),
-            "自适应均线": kama_list.tolist(),
-            "自适应均线偏离": list(map(to_percentage, bias_kama_list)),
             "20日均线": mean_20day.tolist(),
             "20均线偏离度": list(map(to_percentage, bias_20_list)),
             "30日均线": mean_30day.tolist(),
             "30均线偏离度": list(map(to_percentage, bias_30_list)),
             "60日均线": mean_60day.tolist(),
             "60均线偏离度": list(map(to_percentage, bias_list)),
+            "120日均线": mean_120day.tolist(),
+            "120均线偏离度": list(map(to_percentage, bias_120_list)),
             "成交额": list(map(to_yi_round2, amount.tolist())),
             "成交额涨跌幅": list(map(to_percentage, amount_change.tolist())),
             "本日状态": status_list,

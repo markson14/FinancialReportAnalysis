@@ -107,11 +107,13 @@ def get_debts_report(debts_df, code: str):
     _, total_liabilities_list = return_last_4q(
         "*负债合计", debts_df, parse_chinese_number
     )
+    _, total_equity_list = return_last_4q("*资产合计", debts_df, parse_chinese_number)
 
     return {
         "net_equity_list": net_equity_list,
         "monetary_funds": monetary_funds_list[0],
         "total_liabilities": total_liabilities_list[0],
+        "total_equity": total_equity_list[0],
     }
 
 

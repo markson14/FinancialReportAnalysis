@@ -7,6 +7,9 @@ import time
 import warnings
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+import logging
+from datetime import datetime
+import os
 
 warnings.filterwarnings("ignore")
 
@@ -35,8 +38,8 @@ async def get_data_async(code: str):
         )
     time.sleep(0.1)
 
-    # 获取财务报告日期
-    fa_date = int(financial_data["报告期"].values[0].replace("-", ""))
+    # 获取最新财务报告日期，financial_data为正序排列
+    fa_date = int(financial_data["报告期"].values[-1].replace("-", ""))
 
     # 并行获取历史数据和股票信息
     with ThreadPoolExecutor(max_workers=2) as executor:
@@ -48,6 +51,7 @@ async def get_data_async(code: str):
                 "daily",
                 str(fa_date - 5),
                 str(fa_date),
+                "qfq",
             ),
             loop.run_in_executor(executor, ak.stock_individual_info_em, code),
         )
@@ -60,53 +64,78 @@ async def get_stock_data(code: str, rt_info: pd.DataFrame, sy_info: pd.DataFrame
         result = await get_data_async(code)
         if not result:
             return None
+
         financial_data, benefits_data, debts_data, cash_data, fa_price, stock_info = (
             result
         )
-        ######################### basic information #########################
-        # 获取个股最新财务指标数据
-        rt_stock_info = rt_info[rt_info["代码"] == code]
 
-        # 获取个股商誉
-        sy_stock_info = sy_info[sy_info["股票代码"] == code]
-        if sy_stock_info.empty:
-            shangyu_report = {"商誉": 0, "商誉占比": 0}
-        else:
-            shangyu_report = {
-                "商誉": to_yi_round2(sy_stock_info["商誉"].values[0]),
-                "商誉占比": round(sy_stock_info["商誉占净资产比例"].values[0], 4),
-            }
+        # 基础信息验证
+        rt_stock_info = rt_info[rt_info["代码"] == code]
+        if rt_stock_info.empty:
+            print(f"{code} 未找到实时信息")
+            return None
 
         name = rt_stock_info["名称"].values[0]
         if "退市" in name:
             print(f"{code} 已退市")
             return None
+
         rt_price = rt_stock_info["最新价"].values[0]
         if np.isnan(rt_price):
             print(f"{code} 无最新价: {rt_price=}")
             return None
-        PB = rt_stock_info["市净率"].values[0]
 
-        # 基础信息
-        name = stock_info[stock_info["item"] == "股票简称"]["value"].values[0]
-        sector = stock_info[stock_info["item"] == "行业"]["value"].values[0]
-        total_value = stock_info[stock_info["item"] == "总市值"]["value"].values[0]
-        total_volume = stock_info[stock_info["item"] == "总股本"]["value"].values[0]
+        PB = rt_stock_info["市净率"].values[0]
+        if np.isnan(PB):
+            print(f"{code} 无市净率数据")
+            return None
+
+        # 获取个股商誉
+        sy_stock_info = sy_info[sy_info["股票代码"] == code]
+        shangyu_report = {
+            "商誉": (
+                to_yi_round2(sy_stock_info["商誉"].values[0])
+                if not sy_stock_info.empty
+                else 0
+            ),
+            "商誉占比": (
+                round(sy_stock_info["商誉占净资产比例"].values[0], 4)
+                if not sy_stock_info.empty
+                else 0
+            ),
+        }
+
+        # 获取股票基本信息
+        try:
+            name = stock_info[stock_info["item"] == "股票简称"]["value"].values[0]
+            sector = stock_info[stock_info["item"] == "行业"]["value"].values[0]
+            total_value = stock_info[stock_info["item"] == "总市值"]["value"].values[0]
+            total_volume = stock_info[stock_info["item"] == "总股本"]["value"].values[0]
+        except (IndexError, KeyError) as e:
+            print(f"{code} 获取基本信息失败: {str(e)}")
+            return None
+
         if total_volume == "-":
             print(f"{code} 总股本未揭露")
             return None
+
         if total_value == "-":
             total_value = total_volume * rt_price
 
-        # 财报信息
+        # 财报信息处理
         try:
             fa_value = total_volume * float(fa_price["收盘"].values[0])
-        except:
+        except (IndexError, ValueError) as e:
+            print(f"{code} 计算财报市值失败: {str(e)}")
             return None
+
+        # 获取各类报告
         financial_report = load_ths_report(financial_data, total_volume)
         benefit_report = get_benefits_report(benefits_data, code)
         debts_report = get_debts_report(debts_data, code)
         cash_report = get_cash_report(cash_data, code)
+
+        # 合并基础信息
         out_dict = {
             "股票名称": name,
             "代码": str(code),
@@ -116,60 +145,68 @@ async def get_stock_data(code: str, rt_info: pd.DataFrame, sy_info: pd.DataFrame
             "当前价格": rt_price,
             "总股本": to_yi_round2(total_volume),
         }
+
+        # 合并所有报告
         out_dict.update(financial_report)
         out_dict.update(benefit_report)
         out_dict.update(shangyu_report)
         out_dict.update(cash_report)
         out_dict.update(debts_report)
 
-        ######################### advance metrices #########################
-        # 估值指标
-        PS = round(out_dict["总市值"] / out_dict["营业总收入-TTM"], 2)
-        PE_TTM = round(
-            out_dict["总市值"] / (out_dict["扣非净利润-TTM"] - out_dict["商誉"]), 2
-        )
-        PE_TTM_fr = round(
-            out_dict["财报季市值"] / (out_dict["扣非净利润-TTM"] - out_dict["商誉"]), 2
-        )
-        # 计算减去商誉后的真实ROE
-        ROE = round(PB / PE_TTM, 2)
-        out_dict.update(
-            {
-                "市净率": PB,
-                "市销率": PS,
-                "市盈率-TTM": PE_TTM,
-                "市盈率-TTM(财报)": PE_TTM_fr,
-                "ROE": ROE,
-            }
-        )
-        # compute in advance
+        # 计算高级指标
+        try:
+            PS = round(out_dict["总市值"] / out_dict["营业总收入-TTM"], 2)
+            PE_TTM = round(
+                out_dict["总市值"] / (out_dict["扣非净利润-TTM"] - out_dict["商誉"]), 2
+            )
+            PE_TTM_fr = round(
+                out_dict["财报季市值"]
+                / (out_dict["扣非净利润-TTM"] - out_dict["商誉"]),
+                2,
+            )
+            ROE = round(PB / PE_TTM, 2)
+
+            out_dict.update(
+                {
+                    "市净率": PB,
+                    "市销率": PS,
+                    "市盈率-TTM": PE_TTM,
+                    "市盈率-TTM(财报)": PE_TTM_fr,
+                    "ROE": ROE,
+                }
+            )
+        except (KeyError, ZeroDivisionError) as e:
+            print(f"{code} 计算估值指标失败: {str(e)}")
+            return None
+
+        # 计算其他指标
         current_value = out_dict.pop("当前价格")
         basic_eps = out_dict.pop("basic_eps")
         basic_cps = out_dict.pop("base_cps")
         pe_ttm = out_dict.pop("市盈率-TTM")
 
-        # 股息率 -> 每股分红
+        # 计算股息率
         dividend_year_ratio = get_dividend_year_ratio(code, total_value)
         dividend_per_volume = rt_price * dividend_year_ratio
         dpv = round(dividend_per_volume, 4)
         dividend_yield = round(dpv / current_value, 4)
 
-        # ROE > 12%的季度数
+        # 计算ROE指标
         cumulate_roe_list, roe_larger_12 = get_roe_list(out_dict)
 
-        # 60日均线
+        # 计算均线指标
         mean60day = get_mean60day(code)
 
-        # 自由现金流率
+        # 计算自由现金流率
         fcf_rate = get_fcf_rate(out_dict)
 
-        # 盈利质量
+        # 计算盈利质量
         profit_quality = get_profit_quality(out_dict)
 
-        # RO metrics
+        # 计算RO指标
         ROA = get_RO_metrics(out_dict)
 
-        # 输出结果
+        # 构建最终报告
         final_report = {
             "股票名称": out_dict.pop("股票名称"),
             "代码": out_dict.pop("代码"),
@@ -198,8 +235,8 @@ async def get_stock_data(code: str, rt_info: pd.DataFrame, sy_info: pd.DataFrame
             "当季毛利率同比增速": to_percentage(out_dict.pop("当季毛利率同比增速")),
             "自由现金流": to_yi_round2(out_dict.pop("fcf_ttm")),
             "自由现金流复合增长率": to_percentage(out_dict.pop("fcf_compund_g")),
-            "速动资产/流动负债": out_dict.pop("速动资产/流动负债"),
-            "资产负债率": to_percentage(out_dict.pop("资产负债率")),
+            "总负债": to_yi_round2(out_dict.pop("total_liabilities")),
+            "总资产": to_yi_round2(out_dict.pop("total_equity")),
             "少数股东损益": out_dict.pop("少数股东损益"),
             "当季三费同比": to_percentage(out_dict.pop("当季三费同比")),
             "商誉": out_dict.pop("商誉"),
@@ -226,10 +263,11 @@ async def get_stock_data(code: str, rt_info: pd.DataFrame, sy_info: pd.DataFrame
             "盈利质量": to_percentage(round(profit_quality, 4)),
             "自由现金流率": to_percentage(round(fcf_rate, 4)),
         }
-        del out_dict
+
         return final_report
+
     except Exception as e:
-        print(f"{code} 处理失败: {e}")
+        print(f"{code} 处理失败: {str(e)}")
         return None
 
 
@@ -263,30 +301,73 @@ class AsyncChinaAnalyzer:
 
 
 async def main():
-    analyzer = AsyncChinaAnalyzer()
-    codes = ak.stock_zh_a_spot_em()["代码"].tolist()  # 示例取前100个代码
-    results = await analyzer.run_analysis(codes)
+    try:
+        # 创建输出目录
+        os.makedirs("./daily_report", exist_ok=True)
 
-    # 保存结果
-    df = pd.DataFrame(results)
-    df.to_csv(
-        f"./daily_report/stock_data_{current_date}.csv",
-        index=False,
-    )
+        # 初始化分析器
+        print("初始化分析器...")
+        analyzer = AsyncChinaAnalyzer(max_concurrency=5)
+
+        # 获取股票代码列表
+        print("获取股票代码列表...")
+        try:
+            codes = ak.stock_zh_a_spot_em()["代码"].tolist()
+            print(f"成功获取 {len(codes)} 个股票代码")
+        except Exception as e:
+            print(f"获取股票代码列表失败: {str(e)}")
+            raise
+
+        # 运行分析
+        print("开始分析股票数据...")
+        results = await analyzer.run_analysis(codes)
+
+        # 保存结果
+        if results:
+            df = pd.DataFrame(results)
+            save_path = f"./daily_report/stock_data_{current_date}.csv"
+            df.to_csv(save_path, index=False)
+            print(f"成功保存 {len(results)} 条数据到 {save_path}")
+
+            # 输出统计信息
+            print(f"分析完成: 成功 {len(results)}/{len(codes)} 个股票")
+        else:
+            logger.warning("没有获取到任何数据")
+
+    except Exception as e:
+        print(f"程序执行出错: {str(e)}", exc_info=True)
+        raise
 
 
 def test_api(code):
-    print(code)
-    debt = ak.stock_financial_debt_ths(code)
-    benefit = ak.stock_financial_benefit_ths(code)
-    cash = ak.stock_financial_cash_ths(code)
-    abstract = ak.stock_financial_abstract_ths(code)
+    """测试API调用"""
+    try:
+        print(f"测试API调用: {code}")
 
-    debt.to_csv("./temp/debt.csv", index=False)
-    benefit.to_csv("./temp/benefit.csv", index=False)
-    cash.to_csv("./temp/cash.csv", index=False)
-    abstract.to_csv("./temp/abstract.csv", index=False)
+        # 获取数据
+        debt = ak.stock_financial_debt_ths(code)
+        benefit = ak.stock_financial_benefit_ths(code)
+        cash = ak.stock_financial_cash_ths(code)
+        abstract = ak.stock_financial_abstract_ths(code)
+
+        # 保存数据
+        os.makedirs("./temp", exist_ok=True)
+        debt.to_csv("./temp/debt.csv", index=False)
+        benefit.to_csv("./temp/benefit.csv", index=False)
+        cash.to_csv("./temp/cash.csv", index=False)
+        abstract.to_csv("./temp/abstract.csv", index=False)
+
+        print("API测试完成")
+
+    except Exception as e:
+        print(f"API测试失败: {str(e)}", exc_info=True)
+        raise
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("程序被用户中断")
+    except Exception as e:
+        print(f"程序异常退出: {str(e)}", exc_info=True)
