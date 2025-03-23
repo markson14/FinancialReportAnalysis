@@ -1,3 +1,7 @@
-akshare
-pandas
-numpy
+akshare>=1.11.0
+pandas>=2.0.0
+numpy>=1.24.0
+rich>=13.0.0
+tqdm>=4.65.0
+asyncio>=3.4.3
+python-dateutil>=2.8.2

@@ -71,6 +71,7 @@ async def get_stock_data(code: str, rt_info: pd.DataFrame, sy_info: pd.DataFrame
 
         # 基础信息验证
         rt_stock_info = rt_info[rt_info["代码"] == code]
+        # print(rt_stock_info)
         if rt_stock_info.empty:
             print(f"{code} 未找到实时信息")
             return None
@@ -370,7 +371,7 @@ def test_api(code):
 
 if __name__ == "__main__":
     try:
-        # test_api("601398")
+        # test_api("000858")
         asyncio.run(main())
     except KeyboardInterrupt:
         print("程序被用户中断")
